@@ -6,7 +6,7 @@ Aplicación local para Windows con vista previa, detección de movimiento, encen
 
 Abrí `VigilanciaWebcam.exe` con doble clic. Incluye Python y la interfaz gráfica, así que no necesitás una consola ni instalar Python para usarlo. La primera apertura puede tardar unos segundos mientras prepara sus componentes temporales.
 
-Para las acciones de video necesita VLC de 64 bits instalado en `C:\Program Files\VideoLAN\VLC`; no está incluido dentro del ejecutable. Las ventanas multimedia utilizan .NET Framework de Windows. Las acciones y configuraciones todavía se conservan solo hasta cerrar la aplicación.
+Para las acciones de video necesita VLC de 64 bits instalado en `C:\Program Files\VideoLAN\VLC`; no está incluido dentro del ejecutable. Las ventanas multimedia utilizan .NET Framework de Windows. Las configuraciones y acciones se guardan en perfiles y se recuperan al volver a abrir la aplicación.
 
 ## Instalación desde el código
 
@@ -27,6 +27,24 @@ py -m venv .venv
 5. Con vigilancia activa y la opción de evitar suspensión marcada, la aplicación pide a Windows mantener la PC despierta. Las pantallas pueden apagarse según la configuración de energía de Windows. La aplicación no cambia esa configuración permanentemente.
 6. Al detener la vigilancia, se libera la solicitud de mantener la PC despierta. **Detener cámara** o cerrar la aplicación también libera la webcam.
 
+### Perfiles de configuración
+
+La barra **Perfil** permite mantener distintas configuraciones, por ejemplo **Casa**, **Noche** u **Oficina**. La primera vez se utiliza **Predeterminado**. Cada perfil conserva el índice de cámara, la sensibilidad, las opciones de suspensión y encendido de monitores, la grabación y su carpeta, el micrófono, las reglas de repetición y todas las acciones con sus archivos, demoras, bucles, monitores y modos de pantalla.
+
+- **Nuevo:** pedí un nombre y comenzá con los ajustes iniciales y la lista de acciones vacía.
+- **Duplicar:** creá una copia del perfil actual para modificarla sin cambiar el original.
+- **Guardar:** guardá los cambios del perfil seleccionado inmediatamente.
+- **Renombrar:** cambiá el nombre del perfil actual.
+- **Eliminar:** borrá el perfil después de confirmar. Debe quedar al menos uno; los archivos multimedia y las grabaciones no se eliminan.
+
+Los cambios se guardan automáticamente al **cerrar normalmente la aplicación** y antes de **cambiar, crear o duplicar un perfil**. Al volver a abrir se recupera el último perfil utilizado. La cámara, el micrófono y la vigilancia quedan detenidos hasta que los actives. Mientras la vigilancia esté activa, el selector y los botones que cambian de perfil quedan deshabilitados; **Guardar** sigue disponible. Si cambiás de perfil con la vista previa funcionando, la cámara se detiene para poder aplicar el índice del nuevo perfil.
+
+Los perfiles se almacenan en `%LOCALAPPDATA%\VigilanciaWebcam\profiles.json`, fuera de la carpeta del ejecutable. Reemplazar el `.exe` o usar la versión desde Python conserva los mismos perfiles del usuario de Windows. Solo se guardan los ajustes y las rutas de los archivos; los videos, audios e imágenes no se copian dentro del perfil. Un archivo multimedia que ya no esté disponible permanece en la lista para poder corregir su ruta.
+
+El micrófono se guarda por su nombre e interfaz de audio, no por un índice que Windows pueda reasignar. Si no está disponible al abrir, se muestra como **No conectado** y se pide seleccionar uno antes de grabar con audio. Los monitores desconectados conservan el comportamiento de usar el principal.
+
+El guardado reemplaza el archivo completo de forma atómica y conserva una copia anterior en `profiles.json.bak`. Si se detecta un archivo dañado, se intenta recuperar esa copia y se informa en la barra de perfiles. Si no se puede guardar, se muestra el error; al cerrar podés cancelar el cierre para corregirlo o elegir cerrar sin guardar. Un cierre forzado o corte de energía conserva el último guardado completado, no necesariamente los cambios más recientes.
+
 ### Grabar cuando hay movimiento
 
 1. Antes de activar la vigilancia, marcá **Grabar al detectar movimiento**. **Incluir audio del micrófono** viene activado; podés elegir el micrófono de la webcam, el de tus auriculares o el predeterminado de Windows. Desmarcalo únicamente si querés un video sin sonido.
@@ -46,7 +64,7 @@ Un movimiento prolongado se divide en clips de hasta **5 minutos**. Detener la v
 
 Si falla la escritura, se pierde el micrófono o quedan menos de 100 MB libres, se detiene la grabación y se muestra el error; la detección y las acciones continúan. Después de resolverlo, detené y reactivá la vigilancia para reintentar. Un error de audio no se presenta como una grabación exitosa sin sonido. Si falla la unión de un clip, se conservan el video y el WAV por separado y se informa el error. Los clips no se borran automáticamente: revisá periódicamente el espacio disponible. Archivos con terminación `.grabando.avi`, `.grabando.wav` o `.uniendo.avi` están en curso o quedaron incompletos; un corte de energía o cierre forzado puede impedir finalizarlos.
 
-La grabación está desmarcada al abrir la aplicación. Igual que las otras opciones, sus ajustes todavía no se guardan entre ejecuciones. La versión ejecutable también puede grabar sin instalar Python; VLC solo es necesario para las acciones de reproducción de video.
+La grabación está desmarcada en los perfiles nuevos. Al recuperar un perfil se conserva la selección guardada, pero no se empieza a grabar hasta activar la vigilancia y detectar movimiento. La versión ejecutable también puede grabar sin instalar Python; VLC solo es necesario para las acciones de reproducción de video.
 
 ### Acciones al detectar movimiento
 
@@ -80,7 +98,7 @@ Solo las acciones temporales (audio/video sin bucle e imágenes con duración) b
 
 Los registros del detector (como máximo uno cada tres segundos) son independientes de las activaciones de la lista. Arriba del log se muestra si las acciones están preparadas, esperando o reproduciéndose. Al detener la vigilancia, detener la cámara, perder la cámara o cerrar la aplicación, se cancelan las demoras y se cierran los reproductores iniciados por la aplicación. Al reactivar, empieza una sesión nueva y vuelve a estar disponible el modo de una sola vez.
 
-Las acciones y los ajustes se conservan durante la ejecución de la aplicación; por ahora no se guardan al cerrarla. El registro muestra hasta aproximadamente los últimos 1000 mensajes.
+Las acciones y los ajustes se guardan con el perfil al cerrar o cambiar de perfil. El registro de movimientos se conserva solo durante la ejecución y muestra hasta aproximadamente los últimos 1000 mensajes.
 
 El reproductor usa ventanas WPF de Windows. Los videos se reproducen mediante VLC de 64 bits, con salida de video nativa y decodificación por software para evitar las pausas de imagen observadas al iniciar en monitores secundarios. Requiere VLC instalado en `C:\Program Files\VideoLAN\VLC`. Audio e imágenes usan WPF; sus formatos dependen de los códecs de Windows. Probá tus archivos con **Probar ahora**. Al ejecutar desde el código, el reproductor se prepara automáticamente en `.build` con el compilador de .NET Framework del sistema; el ejecutable distribuido ya lo incluye compilado. No se modifica la política de PowerShell.
 

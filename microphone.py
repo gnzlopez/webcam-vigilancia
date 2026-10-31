@@ -26,6 +26,11 @@ def input_rate(device):
         raise ValueError(f'No se puede usar el micrófono seleccionado: {exc}') from exc
 
 
+def input_identity(device):
+    info = sd.query_devices(device, 'input')
+    return {'name': info['name'], 'host_api': sd.query_hostapis(info['hostapi'])['name']}
+
+
 class AudioBuffer:
     """A bounded RAM buffer; no microphone audio is saved outside a motion clip."""
     def __init__(self, rate):

@@ -10,3 +10,4 @@ dist/
 .env.*
 movimiento_*.avi
 movimiento_*.wav
+profiles*.json*

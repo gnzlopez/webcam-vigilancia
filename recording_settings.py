@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from recording import RecordingConfig
-from microphone import input_devices
+from microphone import input_devices, input_identity
 
 
 class RecordingSettings(ttk.LabelFrame):
@@ -17,9 +17,14 @@ class RecordingSettings(ttk.LabelFrame):
         self.audio = tk.BooleanVar(value=True)
         self.microphone = tk.StringVar(value='Micrófono predeterminado de Windows')
         self.microphones = {self.microphone.get(): None}
+        self.microphone_identities = {self.microphone.get(): None}
+        self.missing_microphones = set()
         try:
             for index, name in input_devices():
-                self.microphones[f'{name} ({index + 1})'] = index
+                label = f'{name} ({index + 1})'
+                identity = input_identity(index)
+                self.microphones[label] = index
+                self.microphone_identities[label] = identity
         except Exception:
             # The selected input is validated explicitly before arming.
             pass
@@ -66,6 +71,8 @@ class RecordingSettings(ttk.LabelFrame):
             return None
         if not self.folder.get().strip():
             raise ValueError('Elegí una carpeta para guardar las grabaciones.')
+        if self.audio.get() and self.microphone.get() in self.missing_microphones:
+            raise ValueError('El micrófono de este perfil no está conectado. Conectalo o seleccioná otro antes de activar la grabación.')
         try:
             seconds = float(self.seconds.get().replace(',', '.'))
         except ValueError:
@@ -74,6 +81,30 @@ class RecordingSettings(ttk.LabelFrame):
                                  self.microphones[self.microphone.get()])
         config.prepare()
         return config
+
+    def profile_values(self):
+        return {
+            'recording_enabled': self.enabled.get(), 'recording_folder': self.folder.get(),
+            'recording_quiet_seconds': float(self.seconds.get().replace(',', '.')),
+            'recording_audio': self.audio.get(),
+            'microphone': self.microphone_identities[self.microphone.get()],
+        }
+
+    def apply_profile(self, settings):
+        self.enabled.set(settings['recording_enabled'])
+        self.folder.set(settings['recording_folder'])
+        self.seconds.set(f"{settings['recording_quiet_seconds']:g}")
+        self.audio.set(settings['recording_audio'])
+        identity = settings['microphone']
+        label = next((label for label, value in self.microphone_identities.items() if value == identity), None)
+        if label is None:
+            label = f"{identity['name']} · No conectado"
+            self.microphones[label] = None
+            self.microphone_identities[label] = identity
+            self.missing_microphones.add(label)
+            self.microphone_combo.configure(values=list(self.microphones))
+        self.microphone.set(label)
+        self.refresh()
 
     def open_folder(self):
         try:

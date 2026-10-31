@@ -7,19 +7,22 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
+from dataclasses import asdict
 
 import cv2
 from detector import MotionDetector
-from actions import ActionSequence, RepeatGate
+from actions import Action, ActionSequence, RepeatGate, REPEAT_NAMES
 from action_editor import ActionSettings
 from media import launch_media
 from recording import MotionRecorder
 from recording_settings import RecordingSettings
 from display_power import DisplayWake
+from profiles import ProfileStore, validate_settings
+from profile_controls import ProfileControls
 
 
 class Monitor:
-    def __init__(self, root):
+    def __init__(self, root, profile_store=None):
         self.root = root
         root.title('Vigilancia con webcam')
         root.geometry(f'1000x{min(920, root.winfo_screenheight() - 100)}')
@@ -97,7 +100,40 @@ class Monitor:
             activeforeground='white', relief='flat', cursor='hand2',
         )
         self.vigilance_button.pack(pady=(12, 0))
+        self.profile_controls = ProfileControls(root, self, profile_store or ProfileStore())
+        self.profile_controls.pack(fill='x', before=self.preview)
         self.root.after(50, self.poll)
+
+    def profile_settings(self):
+        try:
+            settings = {
+                'camera': self.camera.get(), 'sensitivity': int(self.sensitivity.get()),
+                'prevent_sleep': self.awake.get(), 'wake_monitors': self.wake_monitors.get(),
+                'repeat_mode': self.action_settings.mode_key(),
+                'quiet_seconds': float(self.action_settings.quiet_seconds.get().replace(',', '.')),
+                'interval_seconds': float(self.action_settings.interval_seconds.get().replace(',', '.')),
+                'actions': [asdict(action) for action in self.action_settings.actions],
+                **self.recording_settings.profile_values(),
+            }
+            return validate_settings(settings)
+        except (ValueError, tk.TclError) as exc:
+            raise ValueError(f'No se pudo guardar el perfil. Revisá los valores de cámara, sensibilidad y tiempos. {exc}') from exc
+
+    def apply_profile(self, settings):
+        if self.worker is not None:
+            self.stop_camera()
+        self.camera.set(settings['camera'])
+        self.sensitivity.set(settings['sensitivity'])
+        self.awake.set(settings['prevent_sleep'])
+        self.wake_monitors.set(settings['wake_monitors'])
+        self.recording_settings.apply_profile(settings)
+        self.action_settings.mode.set(REPEAT_NAMES[settings['repeat_mode']])
+        self.action_settings.quiet_seconds.set(f"{settings['quiet_seconds']:g}")
+        self.action_settings.interval_seconds.set(f"{settings['interval_seconds']:g}")
+        self.action_settings.actions = [Action(**value) for value in settings['actions']]
+        self.action_settings.mode_changed()
+        self.action_settings.refresh()
+        self.configure()
 
     def configure(self, *_):
         self.options = (int(self.sensitivity.get()), self.awake.get(), self.armed.get(),
@@ -131,6 +167,7 @@ class Monitor:
             self.activity_panel.grid_remove()
             self.settings_panel.grid()
         self.update_vigilance_button()
+        self.profile_controls.set_active(active)
 
     def update_vigilance_button(self):
         if not self.armed.get():
@@ -399,6 +436,13 @@ class Monitor:
         self.action_status.set(text)
 
     def close(self):
+        if self.closing:
+            return
+        try:
+            self.profile_controls.save_current()
+        except (ValueError, OSError, tk.TclError) as exc:
+            if not messagebox.askyesno('No se pudo guardar el perfil', f'{exc}\n\n¿Cerrar sin guardar los cambios?', parent=self.root):
+                return
         self.closing = True
         self.stop_camera()
         self.vigilance_button.configure(state='disabled')
