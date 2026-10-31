@@ -8,3 +8,4 @@ dist/
 *.log
 .env
 .env.*
+movimiento_*.avi

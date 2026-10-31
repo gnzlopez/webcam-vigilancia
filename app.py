@@ -13,6 +13,8 @@ from detector import MotionDetector
 from actions import ActionSequence, RepeatGate
 from action_editor import ActionSettings
 from media import launch_media
+from recording import MotionRecorder
+from recording_settings import RecordingSettings
 
 
 class Monitor:
@@ -28,7 +30,8 @@ class Monitor:
         self.worker = None
         self.closing = False
         self.generation = 0
-        self.options = (50, True, False, self.generation)
+        self.session_recording = None
+        self.options = (50, True, False, self.generation, None)
         self.gate = RepeatGate()
         self.session_actions = ()
         self.sequence = ActionSequence(launch_media, self.append_log)
@@ -39,6 +42,7 @@ class Monitor:
         self.preparing = False
         self.status = tk.StringVar(value='Cámara detenida')
         self.action_status = tk.StringVar()
+        self.recording_status = tk.StringVar(value='Grabación desactivada')
         self.count = 0
         bar = ttk.Frame(root, padding=12)
         bar.pack(fill='x')
@@ -62,6 +66,8 @@ class Monitor:
         ttk.Checkbutton(self.settings_panel, text='Evitar suspensión automática mientras vigila (permite apagar pantallas)', variable=self.awake, command=self.configure).pack(anchor='w')
         ttk.Label(self.settings_panel, text='Sensibilidad: baja ← → alta').pack(anchor='w', pady=(8, 0))
         ttk.Scale(self.settings_panel, from_=1, to=100, variable=self.sensitivity, command=self.configure).pack(fill='x')
+        self.recording_settings = RecordingSettings(self.settings_panel)
+        self.recording_settings.pack(fill='x', pady=(8, 0))
         self.action_settings = ActionSettings(self.settings_panel)
         self.action_settings.pack(fill='x', pady=(8, 0))
 
@@ -69,6 +75,11 @@ class Monitor:
         self.activity_panel.grid(row=0, column=0, sticky='nsew')
         ttk.Label(self.activity_panel, textvariable=self.status, wraplength=880).pack(anchor='w', pady=(0, 6))
         ttk.Label(self.activity_panel, textvariable=self.action_status, wraplength=880).pack(anchor='w', pady=(0, 6))
+        recording_row = ttk.Frame(self.activity_panel)
+        recording_row.pack(fill='x', pady=(0, 6))
+        self.recording_label = ttk.Label(recording_row, textvariable=self.recording_status, wraplength=700)
+        self.recording_label.pack(side='left', fill='x', expand=True)
+        ttk.Button(recording_row, text='Abrir grabaciones', command=self.recording_settings.open_folder).pack(side='right')
         self.log = tk.Text(self.activity_panel, height=6, state='disabled')
         self.log.pack(fill='both', expand=True)
         self.activity_panel.grid_remove()
@@ -83,7 +94,8 @@ class Monitor:
         self.root.after(50, self.poll)
 
     def configure(self, *_):
-        self.options = (int(self.sensitivity.get()), self.awake.get(), self.armed.get(), self.generation)
+        self.options = (int(self.sensitivity.get()), self.awake.get(), self.armed.get(),
+                        self.generation, self.session_recording)
 
     def set_vigilance(self, active):
         was_active = self.armed.get()
@@ -99,6 +111,9 @@ class Monitor:
                 self.count = 0
                 self.status.set('Preparando vigilancia…')
                 self.append_log('Preparando vigilancia; esperando la calibración de la cámara.')
+                self.recording_status.set('Grabación preparada; esperando movimiento tras calibrar.'
+                                          if self.session_recording else 'Grabación desactivada')
+                self.recording_label.configure(foreground='')
         else:
             self.preparing = False
             self.sequence.stop()
@@ -127,9 +142,15 @@ class Monitor:
             except ValueError as exc:
                 messagebox.showerror('Repetición', str(exc))
                 return
+            try:
+                recording = self.recording_settings.get_config()
+            except (ValueError, OSError) as exc:
+                messagebox.showerror('Grabación', str(exc))
+                return
             if self.start():
                 self.gate = gate
                 self.session_actions = tuple(self.action_settings.actions)
+                self.session_recording = recording
                 self.set_vigilance(True)
 
     def stop_camera(self):
@@ -168,6 +189,7 @@ class Monitor:
 
     def capture(self, index):
         camera = None
+        recorder = None
         try:
             camera = cv2.VideoCapture(index, cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY)
             if not camera.isOpened():
@@ -182,19 +204,28 @@ class Monitor:
                 if not ok:
                     raise RuntimeError('Se perdió la conexión con la cámara. Detené e iniciá la cámara para reconectar.')
                 frame = cv2.resize(frame, (640, 480))
-                sensitivity, keep_awake, armed, generation = self.options
+                sensitivity, keep_awake, armed, generation, recording = self.options
                 requested_power = keep_awake and armed
                 if os.name == 'nt' and requested_power != power_active:
                     result = ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 if requested_power else 0x80000000)
                     if not result:
                         raise RuntimeError('Windows no pudo aplicar el control de suspensión.')
                     power_active = requested_power
-                if armed and generation != previous_generation:
-                    detector = MotionDetector()
+                if generation != previous_generation:
+                    if recorder is not None:
+                        recorder.close()
+                        recorder = None
+                    if armed:
+                        detector = MotionDetector()
+                        if recording is not None:
+                            recorder = MotionRecorder(recording, lambda kind, path, text, session=generation:
+                                                      self.events.put(('recording', session, kind, path, text)))
                 previous_generation = generation
                 if armed:
                     now = time.monotonic()
                     boxes, moving, event, calibrating = detector.update(frame, now, sensitivity)
+                    if recorder is not None and not calibrating:
+                        recorder.update(frame, now, moving, detector.confirmed_motion)
                     for x, y, w, h in boxes:
                         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 190, 255), 2)
                     state = 'Calibrando: dejá la escena quieta durante 3 segundos…' if calibrating else ('Movimiento detectado' if moving else 'Vigilando · sin movimiento')
@@ -204,6 +235,8 @@ class Monitor:
         except Exception as exc:
             self.events.put(('error', str(exc)))
         finally:
+            if recorder is not None:
+                recorder.close()
             if camera is not None:
                 camera.release()
             if os.name == 'nt':
@@ -218,6 +251,8 @@ class Monitor:
                     self.status.set(item[1])
                     if not self.closing:
                         messagebox.showerror('Cámara', item[1])
+                elif item[0] == 'recording':
+                    self.handle_recording(item)
                 else:
                     self.handle_motion(item)
         except queue.Empty:
@@ -249,6 +284,21 @@ class Monitor:
             self.root.destroy()
             return
         self.root.after(50, self.poll)
+
+    def handle_recording(self, item):
+        _, generation, kind, path, text = item
+        self.append_log(f'{text}: {path}' if kind in ('started', 'saved') else text)
+        if generation != self.generation or not self.armed.get():
+            return
+        if kind == 'started':
+            self.recording_status.set('● Grabando movimiento…')
+            self.recording_label.configure(foreground='#b91c1c')
+        elif kind == 'saved':
+            self.recording_status.set(f'Clip guardado: {path.name} · esperando movimiento.')
+            self.recording_label.configure(foreground='')
+        else:
+            self.recording_status.set(text)
+            self.recording_label.configure(foreground='#b91c1c')
 
     def handle_motion(self, item):
         _, generation, now, moving, confirmed, event, calibrating, state, timestamp = item

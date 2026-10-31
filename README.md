@@ -1,6 +1,6 @@
 # Vigilancia con webcam
 
-Aplicación local para Windows con vista previa, detección de movimiento, registro de eventos y acciones de audio, video e imagen. No graba ni transmite imágenes de la webcam. El encendido de monitores queda para una etapa posterior.
+Aplicación local para Windows con vista previa, detección de movimiento, grabación opcional de clips y acciones de audio, video e imagen. La grabación se habilita desde la configuración y guarda archivos en la carpeta elegida. El encendido de monitores queda para una etapa posterior.
 
 ## Ejecutable para Windows
 
@@ -26,6 +26,23 @@ py -m venv .venv
 4. Para reajustar la sensibilidad, detené la vigilancia: un valor más alto admite áreas de movimiento más pequeñas. Se requiere movimiento sostenido durante 0,3 segundos y se generan eventos como máximo cada tres segundos. Las opciones y los eventos registrados se conservan al alternar entre configuración y vigilancia.
 5. Con vigilancia activa y la opción de evitar suspensión marcada, la aplicación pide a Windows mantener la PC despierta. Las pantallas pueden apagarse según la configuración de energía de Windows. La aplicación no cambia esa configuración permanentemente.
 6. Al detener la vigilancia, se libera la solicitud de mantener la PC despierta. **Detener cámara** o cerrar la aplicación también libera la webcam.
+
+### Grabar cuando hay movimiento
+
+1. Antes de activar la vigilancia, marcá **Grabar video al detectar movimiento (sin audio)**.
+2. Elegí la carpeta de destino. Por defecto se propone `Videos\VigilanciaWebcam` dentro de tu carpeta de usuario. **Abrir carpeta** permite acceder a los archivos.
+3. Configurá cuántos segundos sin movimiento esperar antes de terminar el clip: **5 segundos** por defecto, entre 1 y 60.
+4. Activá la vigilancia. Una vez terminada la calibración, el movimiento confirmado inicia la grabación. El indicador rojo **Grabando movimiento…** aparece sobre el registro.
+
+Mientras siga habiendo movimiento se mantiene el mismo clip. Si vuelve a moverse algo durante la espera, esa espera comienza nuevamente. Después de guardar, otro movimiento confirmado genera un archivo nuevo. La grabación funciona aunque no haya acciones configuradas y es independiente de la opción **Volver a ejecutar**.
+
+Los archivos son videos **AVI/MJPEG de 640 × 480, a 10 fotogramas por segundo, sin audio**, con fecha y hora local en el nombre. Se guardan sin los recuadros del detector y empiezan al confirmar el movimiento; no incluyen los segundos anteriores. La cadencia se ajusta al tiempo transcurrido para evitar reproducir los clips acelerados si cambia la velocidad de captura. La escritura utiliza [VideoWriter de OpenCV](https://docs.opencv.org/4.x/dd/d9e/classcv_1_1VideoWriter.html).
+
+Un movimiento prolongado se divide en clips de hasta **5 minutos**. Detener la vigilancia, detener la cámara o cerrar normalmente la aplicación finaliza y guarda el clip actual. Los inicios, los archivos guardados y los errores aparecen en el registro. Durante la vigilancia también está disponible **Abrir grabaciones**.
+
+Si falla la escritura o quedan menos de 100 MB libres, se detiene la grabación y se muestra el error; la detección y las acciones continúan. Después de resolverlo, detené y reactivá la vigilancia para reintentar. Los clips no se borran automáticamente: revisá periódicamente el espacio disponible. Un archivo con terminación `.grabando.avi` está en curso o quedó incompleto por una interrupción; un corte de energía o cierre forzado puede impedir finalizarlo.
+
+La grabación está desmarcada al abrir la aplicación. Igual que las otras opciones, sus ajustes todavía no se guardan entre ejecuciones. La versión ejecutable también puede grabar sin instalar Python; VLC solo es necesario para las acciones de reproducción de video.
 
 ### Acciones al detectar movimiento
 
@@ -94,4 +111,4 @@ El script ejecuta las pruebas, compila el reproductor y genera `dist\VigilanciaW
 .\.venv\Scripts\python.exe -m unittest -v
 ```
 
-Incluyen escena estática, calibración, movimiento sostenido, las tres reglas de repetición, demoras independientes, prevención de ejecuciones superpuestas, cancelación de acciones y validación de opciones de reproducción y monitor. La cámara física y el comportamiento de energía requieren una prueba en la PC.
+Incluyen escena estática, calibración, movimiento sostenido, las tres reglas de repetición, demoras independientes, prevención de ejecuciones superpuestas, cancelación de acciones y validación de opciones de reproducción y monitor. Las pruebas de grabación generan y vuelven a leer videos sintéticos: comprueban duración, quietud, nuevos episodios, división de clips, cierre, errores de escritura y poco espacio. La cámara física y el comportamiento de energía requieren una prueba en la PC.
