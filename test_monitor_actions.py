@@ -18,6 +18,10 @@ class MonitorActionTests(unittest.TestCase):
         self.monitor.status = Mock()
         self.monitor.action_status = Mock()
         self.monitor.append_log = Mock()
+        self.monitor.wake_monitors = Mock()
+        self.monitor.wake_monitors.get.return_value = True
+        self.monitor.display_wake = Mock()
+        self.monitor.display_wake.request.return_value = False
         self.video = Action('video', 'a.mp4')
         self.image = Action('image', 'a.png', keep_open=True)
         self.monitor.session_actions = (self.video, self.image)

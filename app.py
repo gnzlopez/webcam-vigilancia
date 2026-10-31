@@ -15,6 +15,7 @@ from action_editor import ActionSettings
 from media import launch_media
 from recording import MotionRecorder
 from recording_settings import RecordingSettings
+from display_power import DisplayWake
 
 
 class Monitor:
@@ -34,15 +35,19 @@ class Monitor:
         self.options = (50, True, False, self.generation, None)
         self.gate = RepeatGate()
         self.session_actions = ()
-        self.sequence = ActionSequence(launch_media, self.append_log)
+        self.display_wake = DisplayWake()
+        self.sequence = ActionSequence(self.launch_action, self.append_log)
         self.camera = tk.IntVar(value=0)
         self.sensitivity = tk.IntVar(value=50)
         self.awake = tk.BooleanVar(value=True)
+        self.wake_monitors = tk.BooleanVar(value=True)
         self.armed = tk.BooleanVar(value=False)
         self.preparing = False
         self.status = tk.StringVar(value='Cámara detenida')
         self.action_status = tk.StringVar()
         self.recording_status = tk.StringVar(value='Grabación desactivada')
+        self.recording_active_path = None
+        self.recording_failed = False
         self.count = 0
         bar = ttk.Frame(root, padding=12)
         bar.pack(fill='x')
@@ -64,6 +69,7 @@ class Monitor:
         self.settings_panel = ttk.Frame(panel)
         self.settings_panel.grid(row=0, column=0, sticky='nsew')
         ttk.Checkbutton(self.settings_panel, text='Evitar suspensión automática mientras vigila (permite apagar pantallas)', variable=self.awake, command=self.configure).pack(anchor='w')
+        ttk.Checkbutton(self.settings_panel, text='Encender monitores al detectar movimiento', variable=self.wake_monitors).pack(anchor='w')
         ttk.Label(self.settings_panel, text='Sensibilidad: baja ← → alta').pack(anchor='w', pady=(8, 0))
         ttk.Scale(self.settings_panel, from_=1, to=100, variable=self.sensitivity, command=self.configure).pack(fill='x')
         self.recording_settings = RecordingSettings(self.settings_panel)
@@ -109,6 +115,9 @@ class Monitor:
             if not was_active:
                 self.preparing = True
                 self.count = 0
+                self.display_wake.reset()
+                self.recording_active_path = None
+                self.recording_failed = False
                 self.status.set('Preparando vigilancia…')
                 self.append_log('Preparando vigilancia; esperando la calibración de la cámara.')
                 self.recording_status.set('Grabación preparada; esperando movimiento tras calibrar.'
@@ -144,7 +153,7 @@ class Monitor:
                 return
             try:
                 recording = self.recording_settings.get_config()
-            except (ValueError, OSError) as exc:
+            except (ValueError, OSError, RuntimeError) as exc:
                 messagebox.showerror('Grabación', str(exc))
                 return
             if self.start():
@@ -287,16 +296,33 @@ class Monitor:
 
     def handle_recording(self, item):
         _, generation, kind, path, text = item
-        self.append_log(f'{text}: {path}' if kind in ('started', 'saved') else text)
+        self.append_log(f'{text}: {path}' if kind in ('started', 'saved', 'processing') else text)
         if generation != self.generation or not self.armed.get():
             return
         if kind == 'started':
-            self.recording_status.set('● Grabando movimiento…')
+            self.recording_active_path = path
+            self.recording_status.set(f'● {text}…')
             self.recording_label.configure(foreground='#b91c1c')
+        elif kind == 'processing':
+            if self.recording_active_path == path and not self.recording_failed:
+                self.recording_active_path = None
+                self.recording_status.set('Guardando clip con audio; la detección continúa.')
+                self.recording_label.configure(foreground='')
         elif kind == 'saved':
-            self.recording_status.set(f'Clip guardado: {path.name} · esperando movimiento.')
-            self.recording_label.configure(foreground='')
+            # A previous clip can finish saving while the next one is recording.
+            if self.recording_active_path == path or (self.recording_active_path is not None and
+                    self.recording_active_path.name.replace('.grabando.avi', '.avi') == path.name):
+                self.recording_active_path = None
+            if self.recording_active_path is None and not self.recording_failed:
+                self.recording_status.set(f'Clip guardado: {path.name} · esperando movimiento.')
+                self.recording_label.configure(foreground='')
+        elif kind == 'save_error':
+            if self.recording_active_path is None and not self.recording_failed:
+                self.recording_status.set(text)
+                self.recording_label.configure(foreground='#b91c1c')
         else:
+            self.recording_failed = True
+            self.recording_active_path = None
             self.recording_status.set(text)
             self.recording_label.configure(foreground='#b91c1c')
 
@@ -313,11 +339,27 @@ class Monitor:
             self.count += 1
             self.append_log(f'Movimiento detectado (registro {self.count})', timestamp)
         self.status.set(f'{state} · Registros de esta sesión: {self.count}')
+        if not calibrating and confirmed:
+            self.request_display_wake()
         if not calibrating and self.session_actions:
             blocked = not self.sequence.can_start(self.session_actions)
             if self.gate.update(now, moving, confirmed, blocked):
                 if self.sequence.start(self.session_actions, now):
                     self.append_log('Acciones disponibles activadas; se mantienen las que siguen abiertas.', timestamp)
+
+    def request_display_wake(self):
+        if not self.wake_monitors.get():
+            return
+        try:
+            if self.display_wake.request(time.monotonic()):
+                self.append_log('Se solicitó encender los monitores.')
+        except Exception as exc:
+            self.append_log(f'No se pudieron encender los monitores: {exc}')
+
+    def launch_action(self, action):
+        # Delayed actions may start after the display idle timeout has elapsed.
+        self.request_display_wake()
+        return launch_media(action)
 
     def append_log(self, text, timestamp=None):
         timestamp = timestamp or datetime.now().strftime('%H:%M:%S')

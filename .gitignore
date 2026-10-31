@@ -9,3 +9,4 @@ dist/
 .env
 .env.*
 movimiento_*.avi
+movimiento_*.wav

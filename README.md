@@ -1,6 +1,6 @@
 # Vigilancia con webcam
 
-Aplicación local para Windows con vista previa, detección de movimiento, grabación opcional de clips y acciones de audio, video e imagen. La grabación se habilita desde la configuración y guarda archivos en la carpeta elegida. El encendido de monitores queda para una etapa posterior.
+Aplicación local para Windows con vista previa, detección de movimiento, encendido de monitores, grabación opcional de clips con audio y acciones de audio, video e imagen. La grabación se habilita desde la configuración y guarda archivos en la carpeta elegida.
 
 ## Ejecutable para Windows
 
@@ -29,18 +29,22 @@ py -m venv .venv
 
 ### Grabar cuando hay movimiento
 
-1. Antes de activar la vigilancia, marcá **Grabar video al detectar movimiento (sin audio)**.
+1. Antes de activar la vigilancia, marcá **Grabar al detectar movimiento**. **Incluir audio del micrófono** viene activado; podés elegir el micrófono de la webcam, el de tus auriculares o el predeterminado de Windows. Desmarcalo únicamente si querés un video sin sonido.
 2. Elegí la carpeta de destino. Por defecto se propone `Videos\VigilanciaWebcam` dentro de tu carpeta de usuario. **Abrir carpeta** permite acceder a los archivos.
 3. Configurá cuántos segundos sin movimiento esperar antes de terminar el clip: **5 segundos** por defecto, entre 1 y 60.
 4. Activá la vigilancia. Una vez terminada la calibración, el movimiento confirmado inicia la grabación. El indicador rojo **Grabando movimiento…** aparece sobre el registro.
 
 Mientras siga habiendo movimiento se mantiene el mismo clip. Si vuelve a moverse algo durante la espera, esa espera comienza nuevamente. Después de guardar, otro movimiento confirmado genera un archivo nuevo. La grabación funciona aunque no haya acciones configuradas y es independiente de la opción **Volver a ejecutar**.
 
-Los archivos son videos **AVI/MJPEG de 640 × 480, a 10 fotogramas por segundo, sin audio**, con fecha y hora local en el nombre. Se guardan sin los recuadros del detector y empiezan al confirmar el movimiento; no incluyen los segundos anteriores. La cadencia se ajusta al tiempo transcurrido para evitar reproducir los clips acelerados si cambia la velocidad de captura. La escritura utiliza [VideoWriter de OpenCV](https://docs.opencv.org/4.x/dd/d9e/classcv_1_1VideoWriter.html).
+Los archivos son videos **AVI/MJPEG de 640 × 480, a 10 fotogramas por segundo, con audio mono del micrófono seleccionado**, con fecha y hora local en el nombre. Se guardan sin los recuadros del detector y empiezan al confirmar el movimiento; no incluyen los segundos anteriores. La cadencia se ajusta al tiempo transcurrido para evitar reproducir los clips acelerados si cambia la velocidad de captura. La escritura utiliza [VideoWriter de OpenCV](https://docs.opencv.org/4.x/dd/d9e/classcv_1_1VideoWriter.html).
+
+El micrófono se abre al activar la vigilancia y se libera al detenerla. Mientras espera movimiento, mantiene un pequeño búfer en memoria, sin guardar audio en disco. Al grabar, se toma el tramo de sonido correspondiente al video. La captura usa [sounddevice/PortAudio](https://python-sounddevice.readthedocs.io/en/latest/api/streams.html); cuando el controlador no proporciona tiempos de captura, se estima el inicio con su latencia declarada. No se captura directamente el sonido interno de la PC.
+
+Al finalizar, FFmpeg une video y audio en segundo plano, manteniendo la detección activa. El registro indica **Guardando clip con audio** y después **Clip con audio guardado**. El ejecutable incluye los componentes necesarios; no necesitás instalar FFmpeg ni configurar una consola. Si Windows bloquea el micrófono, revisá **Configuración → Privacidad y seguridad → Micrófono → Permitir que las aplicaciones de escritorio accedan al micrófono**.
 
 Un movimiento prolongado se divide en clips de hasta **5 minutos**. Detener la vigilancia, detener la cámara o cerrar normalmente la aplicación finaliza y guarda el clip actual. Los inicios, los archivos guardados y los errores aparecen en el registro. Durante la vigilancia también está disponible **Abrir grabaciones**.
 
-Si falla la escritura o quedan menos de 100 MB libres, se detiene la grabación y se muestra el error; la detección y las acciones continúan. Después de resolverlo, detené y reactivá la vigilancia para reintentar. Los clips no se borran automáticamente: revisá periódicamente el espacio disponible. Un archivo con terminación `.grabando.avi` está en curso o quedó incompleto por una interrupción; un corte de energía o cierre forzado puede impedir finalizarlo.
+Si falla la escritura, se pierde el micrófono o quedan menos de 100 MB libres, se detiene la grabación y se muestra el error; la detección y las acciones continúan. Después de resolverlo, detené y reactivá la vigilancia para reintentar. Un error de audio no se presenta como una grabación exitosa sin sonido. Si falla la unión de un clip, se conservan el video y el WAV por separado y se informa el error. Los clips no se borran automáticamente: revisá periódicamente el espacio disponible. Archivos con terminación `.grabando.avi`, `.grabando.wav` o `.uniendo.avi` están en curso o quedaron incompletos; un corte de energía o cierre forzado puede impedir finalizarlos.
 
 La grabación está desmarcada al abrir la aplicación. Igual que las otras opciones, sus ajustes todavía no se guardan entre ejecuciones. La versión ejecutable también puede grabar sin instalar Python; VLC solo es necesario para las acciones de reproducción de video.
 
@@ -80,15 +84,23 @@ Las acciones y los ajustes se conservan durante la ejecución de la aplicación;
 
 El reproductor usa ventanas WPF de Windows. Los videos se reproducen mediante VLC de 64 bits, con salida de video nativa y decodificación por software para evitar las pausas de imagen observadas al iniciar en monitores secundarios. Requiere VLC instalado en `C:\Program Files\VideoLAN\VLC`. Audio e imágenes usan WPF; sus formatos dependen de los códecs de Windows. Probá tus archivos con **Probar ahora**. Al ejecutar desde el código, el reproductor se prepara automáticamente en `.build` con el compilador de .NET Framework del sistema; el ejecutable distribuido ya lo incluye compilado. No se modifica la política de PowerShell.
 
+### Encender monitores al detectar movimiento
+
+La opción **Encender monitores al detectar movimiento** viene marcada. Después de la calibración, un movimiento confirmado solicita a Windows encender todas las pantallas, incluso si no hay acciones configuradas. También se solicita antes de abrir cada acción, para cubrir las acciones con demora. La solicitud no depende del modo de repetición de las acciones: puede encender las pantallas aunque ya haya una imagen abierta o un video en bucle.
+
+Mientras continúa el movimiento, la solicitud se limita a una cada cinco segundos. En el registro aparece **Se solicitó encender los monitores**; si Windows rechaza la solicitud, se muestra el error y las acciones continúan. Esto confirma el envío de la orden, no permite verificar físicamente el estado de cada pantalla.
+
+Funciona con pantallas apagadas por ahorro de energía de Windows. No puede encender un monitor apagado con su botón físico o sin alimentación, despertar una PC suspendida ni desbloquear una sesión de Windows. No mueve el mouse ni modifica permanentemente los tiempos de apagado. Cuando deja de haber movimiento y no se abren nuevas acciones, Windows vuelve a aplicar su tiempo de inactividad habitual. Se utilizan [las solicitudes de actividad de Windows](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate) y [SC_MONITORPOWER](https://learn.microsoft.com/en-us/windows/win32/menurc/wm-syscommand).
+
 ### Evitar suspensión automática mientras vigila
 
 Cuando está marcada y la vigilancia está activa, la aplicación pide a Windows que no suspenda la PC por inactividad. Así la cámara puede seguir detectando movimiento aunque no uses el teclado o el mouse. Por ejemplo, si Windows está configurado para suspender la PC después de 15 minutos sin uso, la solicitud evita esa suspensión mientras vigila.
 
-Los monitores pueden apagarse por ahorro de energía: apagar una pantalla no es suspender la PC. Esta opción no enciende ni apaga las pantallas. Si la desmarcás, detenés la vigilancia o cerrás la aplicación, Windows vuelve a aplicar sus tiempos habituales de suspensión, salvo que otra aplicación también esté solicitando mantener la PC despierta. No se modifica permanentemente tu plan de energía.
+Los monitores pueden apagarse por ahorro de energía: apagar una pantalla no es suspender la PC. **Evitar suspensión** solo mantiene despierta la computadora; **Encender monitores al detectar movimiento** controla el encendido de las pantallas por separado. Si desmarcás la opción de evitar suspensión, detenés la vigilancia o cerrás la aplicación, Windows vuelve a aplicar sus tiempos habituales de suspensión, salvo que otra aplicación también esté solicitando mantener la PC despierta. No se modifica permanentemente tu plan de energía.
 
 La opción no impide que suspendas la PC manualmente desde Windows o con el cierre de tapa configurado para suspender. Si se suspende, la detección se interrumpe.
 
-Probá primero que la detección siga sumando eventos al apagar las pantallas por ahorro de energía y volver a encenderlas. La suspensión manual, hibernación, cierre de tapa o políticas de energía pueden interrumpir la vigilancia. Esta versión no despierta la PC ni enciende los monitores al detectar movimiento.
+Podés probar dejando que Windows apague las pantallas y moviéndote frente a la webcam una vez calibrada. Con ambas opciones marcadas, la PC sigue detectando y solicita encender las pantallas. La suspensión manual, hibernación, cierre de tapa o políticas de energía pueden interrumpir la vigilancia; esta versión no despierta una PC suspendida.
 
 La cámara necesita algo de luz. Sombras, reflejos y cambios de iluminación pueden generar eventos. El sistema detecta cambios visuales, no identifica personas. El registro se conserva solo durante la ejecución. El fondo se adapta lentamente, por lo que un objeto inmóvil deja de considerarse movimiento.
 
@@ -103,7 +115,7 @@ Desde PowerShell, en la carpeta del proyecto:
 .\.venv\Scripts\python.exe build_exe.py
 ```
 
-El script ejecuta las pruebas, compila el reproductor y genera `dist\VigilanciaWebcam.exe` con PyInstaller. Se necesitan Windows de 64 bits, Python con Tcl/Tk y el compilador de .NET Framework. VLC se instala por separado en la PC donde se utilizarán las acciones de video.
+El script ejecuta las pruebas, compila el reproductor e incluye FFmpeg y PortAudio en `dist\VigilanciaWebcam.exe` con PyInstaller. Se necesitan Windows de 64 bits, Python con Tcl/Tk y el compilador de .NET Framework. FFmpeg se obtiene mediante `imageio-ffmpeg`, instalado con las dependencias. VLC se instala por separado en la PC donde se utilizarán las acciones de video.
 
 ## Pruebas
 
@@ -111,4 +123,4 @@ El script ejecuta las pruebas, compila el reproductor y genera `dist\VigilanciaW
 .\.venv\Scripts\python.exe -m unittest -v
 ```
 
-Incluyen escena estática, calibración, movimiento sostenido, las tres reglas de repetición, demoras independientes, prevención de ejecuciones superpuestas, cancelación de acciones y validación de opciones de reproducción y monitor. Las pruebas de grabación generan y vuelven a leer videos sintéticos: comprueban duración, quietud, nuevos episodios, división de clips, cierre, errores de escritura y poco espacio. La cámara física y el comportamiento de energía requieren una prueba en la PC.
+Incluyen escena estática, calibración, movimiento sostenido, las tres reglas de repetición, demoras independientes, prevención de ejecuciones superpuestas, cancelación de acciones y validación de opciones de reproducción y monitor. Las pruebas de grabación generan y vuelven a leer videos sintéticos: comprueban duración, quietud, nuevos episodios, división de clips, cierre, errores de escritura y poco espacio. Las pruebas de audio verifican las dos pistas del AVI, la coincidencia temporal entre un tono y una señal visual, pérdidas de audio, errores del micrófono y de FFmpeg, y la liberación de recursos. Las pruebas automatizadas no utilizan el micrófono real. La cámara física y el comportamiento de energía requieren una prueba en la PC.

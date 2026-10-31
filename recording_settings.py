@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from recording import RecordingConfig
+from microphone import input_devices
 
 
 class RecordingSettings(ttk.LabelFrame):
@@ -13,8 +14,24 @@ class RecordingSettings(ttk.LabelFrame):
         self.enabled = tk.BooleanVar(value=False)
         self.folder = tk.StringVar(value=str(Path.home() / 'Videos' / 'VigilanciaWebcam'))
         self.seconds = tk.StringVar(value='5')
-        ttk.Checkbutton(self, text='Grabar video al detectar movimiento (sin audio)',
+        self.audio = tk.BooleanVar(value=True)
+        self.microphone = tk.StringVar(value='Micrófono predeterminado de Windows')
+        self.microphones = {self.microphone.get(): None}
+        try:
+            for index, name in input_devices():
+                self.microphones[f'{name} ({index + 1})'] = index
+        except Exception:
+            # The selected input is validated explicitly before arming.
+            pass
+        ttk.Checkbutton(self, text='Grabar al detectar movimiento',
                         variable=self.enabled, command=self.refresh).pack(anchor='w')
+        row = ttk.Frame(self)
+        row.pack(fill='x', pady=4)
+        self.audio_check = ttk.Checkbutton(row, text='Incluir audio del micrófono', variable=self.audio, command=self.refresh)
+        self.audio_check.pack(side='left')
+        self.microphone_combo = ttk.Combobox(row, textvariable=self.microphone,
+                                            values=list(self.microphones), state='readonly', width=50)
+        self.microphone_combo.pack(side='left', fill='x', expand=True, padx=(8, 0))
         row = ttk.Frame(self)
         row.pack(fill='x', pady=4)
         ttk.Label(row, text='Guardar en:').pack(side='left')
@@ -35,6 +52,8 @@ class RecordingSettings(ttk.LabelFrame):
         state = 'normal' if self.enabled.get() else 'disabled'
         for widget in (self.folder_entry, self.choose_button, self.seconds_input):
             widget.configure(state=state)
+        self.audio_check.configure(state=state)
+        self.microphone_combo.configure(state='readonly' if self.enabled.get() and self.audio.get() else 'disabled')
 
     def choose(self):
         selected = filedialog.askdirectory(parent=self, title='Carpeta para las grabaciones',
@@ -51,7 +70,8 @@ class RecordingSettings(ttk.LabelFrame):
             seconds = float(self.seconds.get().replace(',', '.'))
         except ValueError:
             raise ValueError('Ingresá un tiempo sin movimiento entre 1 y 60 segundos.') from None
-        config = RecordingConfig(Path(self.folder.get().strip()), seconds)
+        config = RecordingConfig(Path(self.folder.get().strip()), seconds, self.audio.get(),
+                                 self.microphones[self.microphone.get()])
         config.prepare()
         return config
 

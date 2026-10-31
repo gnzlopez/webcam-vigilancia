@@ -8,20 +8,30 @@ import shutil
 import tempfile
 
 import cv2
+from microphone import AudioClip, MicrophoneInput, input_rate
+from recording_mux import ClipFinalizer, ffmpeg_executable
 
 
 @dataclass(frozen=True)
 class RecordingConfig:
     folder: Path
     quiet_seconds: float = 5
+    audio: bool = True
+    microphone: int | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'folder', Path(self.folder).expanduser().resolve())
         if not math.isfinite(self.quiet_seconds) or not 1 <= self.quiet_seconds <= 60:
             raise ValueError('El tiempo sin movimiento debe estar entre 1 y 60 segundos.')
+        if not isinstance(self.audio, bool) or (self.microphone is not None and
+                (type(self.microphone) is not int or self.microphone < 0)):
+            raise ValueError('La configuración del micrófono no es válida.')
 
     def prepare(self):
         """Check the chosen destination before arming, including write permissions."""
+        if self.audio:
+            input_rate(self.microphone)
+            ffmpeg_executable()
         self.folder.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryFile(dir=self.folder) as probe:
             probe.write(b'webcam')
@@ -42,11 +52,22 @@ class MotionRecorder:
         self.failed = False
         self.last_frame = None
         self.last_space_check = float('-inf')
+        self.microphone = None
+        self.audio_clip = None
+        self.finalizer = None
+        if config.audio:
+            try:
+                self.microphone = MicrophoneInput(config.microphone)
+                self.finalizer = ClipFinalizer(report)
+            except Exception as exc:
+                self._fail(exc)
 
     def update(self, frame, now, moving, confirmed):
         if self.failed:
             return
         try:
+            if self.microphone is not None:
+                self.microphone.check()
             # A suspended/disconnected camera must not fabricate minutes of footage.
             if self.writer is not None and now - self.last_sample > self.MAX_FRAME_GAP:
                 self._finish()
@@ -68,6 +89,8 @@ class MotionRecorder:
                     self._check_space()
                     self.last_space_check = now
                 self._write_until(now, frame)
+                if self.audio_clip is not None:
+                    self.audio_clip.update(self.frames_written / self.FPS)
                 self.last_sample = now
                 self.last_frame = frame.copy()
         except Exception as exc:
@@ -92,7 +115,10 @@ class MotionRecorder:
         self.frames_written = 0
         self.last_frame = frame.copy()
         self.last_space_check = now
-        self.report('started', self.path, 'Grabando movimiento')
+        if self.microphone is not None:
+            audio_path = self.path.with_suffix('.wav')
+            self.audio_clip = AudioClip(self.microphone, audio_path, now)
+        self.report('started', self.path, 'Grabando movimiento con audio' if self.config.audio else 'Grabando movimiento sin audio')
 
     def _write_until(self, now, frame, endpoint=True):
         # AVI uses a fixed frame rate. Resample by elapsed time so slower/faster
@@ -119,14 +145,32 @@ class MotionRecorder:
                 raise OSError('El archivo grabado no se pudo verificar.')
         finally:
             reader.release()
-        destination = self.path.with_name(self.path.name.replace('.grabando.avi', '.avi'))
-        self.path.rename(destination)
+        if self.audio_clip is not None:
+            self.audio_clip.update(self.frames_written / self.FPS, final=True)
+            self.audio_clip.close()
+            self.finalizer.submit(self.path, self.audio_clip.path, self.frames_written / self.FPS)
+            self.audio_clip = None
+        else:
+            destination = self.path.with_name(self.path.name.replace('.grabando.avi', '.avi'))
+            self.path.rename(destination)
+            self.report('saved', destination, 'Clip sin audio guardado')
         self.path = None
         self.last_frame = None
-        self.report('saved', destination, 'Clip guardado')
 
     def _fail(self, exc):
         self.failed = True
+        if self.audio_clip is not None:
+            try:
+                self.audio_clip.close()
+            except Exception:
+                pass
+            self.audio_clip = None
+        if self.microphone is not None:
+            try:
+                self.microphone.close()
+            except Exception:
+                pass
+            self.microphone = None
         if self.writer is not None:
             writer, self.writer = self.writer, None
             try:
@@ -145,3 +189,10 @@ class MotionRecorder:
             self._finish()
         except Exception as exc:
             self._fail(exc)
+        finally:
+            if self.microphone is not None:
+                self.microphone.close()
+                self.microphone = None
+            if self.finalizer is not None:
+                self.finalizer.close()
+                self.finalizer = None

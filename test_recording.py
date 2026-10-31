@@ -17,7 +17,7 @@ class RecordingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.config = RecordingConfig(Path(self.temp.name) / 'cámara y clips', 1)
+        self.config = RecordingConfig(Path(self.temp.name) / 'cámara y clips', 1, audio=False)
         self.config.prepare()
         self.reports = []
         self.recorder = MotionRecorder(self.config, lambda *item: self.reports.append(item))
@@ -134,11 +134,11 @@ class RecordingTests(unittest.TestCase):
     def test_invalid_settings_and_unwritable_destination_are_rejected(self):
         for seconds in (0, 61, float('nan'), float('inf')):
             with self.assertRaises(ValueError):
-                RecordingConfig(self.config.folder, seconds)
+                RecordingConfig(self.config.folder, seconds, audio=False)
         file = self.config.folder / 'archivo.txt'
         file.write_text('No es una carpeta')
         with self.assertRaises(OSError):
-            RecordingConfig(file).prepare()
+            RecordingConfig(file, audio=False).prepare()
 
 
 class CaptureRecordingTests(unittest.TestCase):
@@ -151,7 +151,7 @@ class CaptureRecordingTests(unittest.TestCase):
         return monitor
 
     def test_calibration_is_not_recorded_and_stopping_vigilance_closes_clip(self):
-        monitor = self.make_monitor(RecordingConfig(Path(tempfile.gettempdir())))
+        monitor = self.make_monitor(RecordingConfig(Path(tempfile.gettempdir()), audio=False))
         camera = Mock()
         frame = np.zeros((480, 640, 3), np.uint8)
         reads = 0
@@ -179,7 +179,7 @@ class CaptureRecordingTests(unittest.TestCase):
         camera.release.assert_called_once()
 
     def test_camera_failure_finalizes_recording(self):
-        monitor = self.make_monitor(RecordingConfig(Path(tempfile.gettempdir())))
+        monitor = self.make_monitor(RecordingConfig(Path(tempfile.gettempdir()), audio=False))
         camera = Mock()
         camera.read.side_effect = [(True, np.zeros((480, 640, 3), np.uint8)), (False, None)]
         detector = Mock(confirmed_motion=True)
