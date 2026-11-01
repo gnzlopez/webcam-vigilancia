@@ -123,8 +123,9 @@ class MicrophoneInput:
         if self.first_sample is None:
             self.first_sample = observed
         timestamp = self.first_sample + self.samples_received / self.rate
-        if abs(observed - timestamp) > .25:
-            self.buffer.fail('El reloj del micrófono cambió; se detuvo la grabación para evitar audio desincronizado.')
+        drift = abs(observed - timestamp)
+        if drift > .25:
+            self.buffer.fail(f'El reloj del micrófono se desvió {drift * 1000:.0f} ms; no se puede garantizar la sincronización del audio.')
             raise sd.CallbackAbort
         self.buffer.append(timestamp, bytes(data))
         self.samples_received += frames

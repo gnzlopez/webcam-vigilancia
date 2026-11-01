@@ -55,19 +55,23 @@ class MotionRecorder:
         self.microphone = None
         self.audio_clip = None
         self.finalizer = None
+        self.audio_disabled = False
         if config.audio:
             try:
                 self.microphone = MicrophoneInput(config.microphone)
                 self.finalizer = ClipFinalizer(report)
             except Exception as exc:
-                self._fail(exc)
+                self._disable_audio(exc)
 
     def update(self, frame, now, moving, confirmed):
         if self.failed:
             return
         try:
             if self.microphone is not None:
-                self.microphone.check()
+                try:
+                    self.microphone.check()
+                except Exception as exc:
+                    self._disable_audio(exc)
             # A suspended/disconnected camera must not fabricate minutes of footage.
             if self.writer is not None and now - self.last_sample > self.MAX_FRAME_GAP:
                 self._finish()
@@ -90,7 +94,10 @@ class MotionRecorder:
                     self.last_space_check = now
                 self._write_until(now, frame)
                 if self.audio_clip is not None:
-                    self.audio_clip.update(self.frames_written / self.FPS)
+                    try:
+                        self.audio_clip.update(self.frames_written / self.FPS)
+                    except Exception as exc:
+                        self._disable_audio(exc)
                 self.last_sample = now
                 self.last_frame = frame.copy()
         except Exception as exc:
@@ -117,8 +124,11 @@ class MotionRecorder:
         self.last_space_check = now
         if self.microphone is not None:
             audio_path = self.path.with_suffix('.wav')
-            self.audio_clip = AudioClip(self.microphone, audio_path, now)
-        self.report('started', self.path, 'Grabando movimiento con audio' if self.config.audio else 'Grabando movimiento sin audio')
+            try:
+                self.audio_clip = AudioClip(self.microphone, audio_path, now)
+            except Exception as exc:
+                self._disable_audio(exc)
+        self.report('started', self.path, 'Grabando movimiento con audio' if self.audio_clip is not None else 'Grabando movimiento sin audio')
 
     def _write_until(self, now, frame, endpoint=True):
         # AVI uses a fixed frame rate. Resample by elapsed time so slower/faster
@@ -146,16 +156,49 @@ class MotionRecorder:
         finally:
             reader.release()
         if self.audio_clip is not None:
-            self.audio_clip.update(self.frames_written / self.FPS, final=True)
-            self.audio_clip.close()
-            self.finalizer.submit(self.path, self.audio_clip.path, self.frames_written / self.FPS)
-            self.audio_clip = None
-        else:
+            try:
+                self.audio_clip.update(self.frames_written / self.FPS, final=True)
+                self.audio_clip.close()
+                self.finalizer.submit(self.path, self.audio_clip.path, self.frames_written / self.FPS)
+            except Exception as exc:
+                self._disable_audio(exc)
+            else:
+                # The finalizer now owns these files. Never delete a queued WAV.
+                self.audio_clip = None
+                self.path = None
+        if self.path is not None:
             destination = self.path.with_name(self.path.name.replace('.grabando.avi', '.avi'))
             self.path.rename(destination)
             self.report('saved', destination, 'Clip sin audio guardado')
         self.path = None
         self.last_frame = None
+
+    def _disable_audio(self, exc):
+        """Degrade this session to video only without closing its video writer."""
+        if self.audio_disabled:
+            return
+        self.audio_disabled = True
+        cleanup_errors = []
+        if self.audio_clip is not None:
+            clip, self.audio_clip = self.audio_clip, None
+            try:
+                clip.close()
+                # Only discard this clip's unsynchronized audio, never its video.
+                clip.path.unlink(missing_ok=True)
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f'Quedó audio parcial en {clip.path}: {cleanup_exc}.')
+        if self.microphone is not None:
+            microphone, self.microphone = self.microphone, None
+            try:
+                microphone.close()
+            except Exception as cleanup_exc:
+                cleanup_errors.append(f'No se pudo cerrar el micrófono: {cleanup_exc}.')
+        message = (f'Audio desactivado: {exc} La grabación de video continúa. '
+                   'El clip actual y los siguientes se guardarán sin audio. '
+                   'Detené y reactivá la vigilancia para reintentar el audio.')
+        if cleanup_errors:
+            message += ' ' + ' '.join(cleanup_errors)
+        self.report('audio_warning', self.path, message)
 
     def _fail(self, exc):
         self.failed = True

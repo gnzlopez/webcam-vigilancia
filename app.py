@@ -51,6 +51,7 @@ class Monitor:
         self.recording_status = tk.StringVar(value='Grabación desactivada')
         self.recording_active_path = None
         self.recording_failed = False
+        self.recording_audio_disabled = False
         self.count = 0
         bar = ttk.Frame(root, padding=12)
         bar.pack(fill='x')
@@ -154,6 +155,7 @@ class Monitor:
                 self.display_wake.reset()
                 self.recording_active_path = None
                 self.recording_failed = False
+                self.recording_audio_disabled = False
                 self.status.set('Preparando vigilancia…')
                 self.append_log('Preparando vigilancia; esperando la calibración de la cámara.')
                 self.recording_status.set('Grabación preparada; esperando movimiento tras calibrar.'
@@ -336,9 +338,17 @@ class Monitor:
         self.append_log(f'{text}: {path}' if kind in ('started', 'saved', 'processing') else text)
         if generation != self.generation or not self.armed.get():
             return
-        if kind == 'started':
+        if kind == 'audio_warning':
+            self.recording_audio_disabled = True
+            if not self.recording_failed:
+                self.recording_status.set('● Grabando movimiento sin audio · audio desactivado por un fallo.'
+                                          if self.recording_active_path is not None else
+                                          'Audio desactivado por un fallo · esperando movimiento para grabar video.')
+                self.recording_label.configure(foreground='#a16207')
+        elif kind == 'started':
             self.recording_active_path = path
-            self.recording_status.set(f'● {text}…')
+            suffix = ' · audio desactivado por un fallo.' if self.recording_audio_disabled else '…'
+            self.recording_status.set(f'● {text}{suffix}')
             self.recording_label.configure(foreground='#b91c1c')
         elif kind == 'processing':
             if self.recording_active_path == path and not self.recording_failed:
@@ -351,8 +361,9 @@ class Monitor:
                     self.recording_active_path.name.replace('.grabando.avi', '.avi') == path.name):
                 self.recording_active_path = None
             if self.recording_active_path is None and not self.recording_failed:
-                self.recording_status.set(f'Clip guardado: {path.name} · esperando movimiento.')
-                self.recording_label.configure(foreground='')
+                suffix = ' · audio desactivado por un fallo.' if self.recording_audio_disabled else '.'
+                self.recording_status.set(f'Clip guardado: {path.name} · esperando movimiento{suffix}')
+                self.recording_label.configure(foreground='#a16207' if self.recording_audio_disabled else '')
         elif kind == 'save_error':
             if self.recording_active_path is None and not self.recording_failed:
                 self.recording_status.set(text)
